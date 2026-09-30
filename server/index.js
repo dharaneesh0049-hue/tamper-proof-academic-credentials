@@ -21,6 +21,9 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
+const DIST_DIR = path.join(__dirname, "../dist");
+
+
 function readDb() {
   return JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
 }
@@ -83,13 +86,16 @@ function getLanIp() {
 }
 
 function verificationUrlFor(id) {
-  return `http://${getLanIp()}:5173/verify/${encodeURIComponent(id)}`;
+  const baseUrl = (process.env.PUBLIC_APP_URL || process.env.RENDER_EXTERNAL_URL || `http://${getLanIp()}:5173`).replace(/\/$/, "");
+  return `${baseUrl}/verify/${encodeURIComponent(id)}`;
 }
 
 
 function makeCredentialId() {
   return `CRD-${new Date().getFullYear()}-${crypto.randomBytes(5).toString("hex").toUpperCase()}`;
 }
+
+app.use(express.static(DIST_DIR));
 
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, service: "TrustCert API", time: new Date().toISOString() });
@@ -312,7 +318,23 @@ app.get("/api/security", (req, res) => {
   });
 });
 
-app.listen(4000, "0.0.0.0", () => {
-  console.log("TrustCert API running on port 4000");
-  console.log(`QR verification URL uses: ${getLanIp()}:5173`);
+// Serve the built React app on the root URL and client-side routes.
+const indexFile = path.join(DIST_DIR, "index.html");
+
+app.get("/", (req, res) => {
+  if (fs.existsSync(indexFile)) return res.sendFile(indexFile);
+  return res.status(503).send("Frontend build not found. Check the Render build command: npm install && npm run build");
+});
+
+// SPA fallback must come after all API routes.
+app.get(/.*/, (req, res, next) => {
+  if (req.path.startsWith("/api/")) return next();
+  if (fs.existsSync(indexFile)) return res.sendFile(indexFile);
+  return res.status(503).send("Frontend build not found. Check the Render build command: npm install && npm run build");
+});
+
+const PORT = Number(process.env.PORT) || 4000;
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`TrustCert app running on port ${PORT}`);
+  console.log(`Public QR base URL: ${process.env.PUBLIC_APP_URL || `http://${getLanIp()}:5173`}`);
 });
